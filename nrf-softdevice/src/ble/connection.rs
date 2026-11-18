@@ -532,18 +532,8 @@ impl Connection {
     /// [`Self::rssi`]) on every connection event.
     #[cfg(feature = "ble-rssi")]
     pub fn start_rssi(&self) {
-        self.start_rssi_with(0, 0)
-    }
-
-    /// Start measuring RSSI on this connection. The SoftDevice samples it on
-    /// every connection event, and raises an event (averaged into
-    /// [`Self::rssi`]) once it changed by `threshold_bdm` or more for
-    /// `skip_count` samples. With `raw::BLE_GAP_RSSI_THRESHOLD_INVALID`, no
-    /// events: read the last sample with [`Self::read_rssi`].
-    #[cfg(feature = "ble-rssi")]
-    pub fn start_rssi_with(&self, threshold_dbm: u8, skip_count: u8) {
         if let Ok(conn_handle) = self.with_state(|state| state.check_connected()) {
-            let ret = unsafe { raw::sd_ble_gap_rssi_start(conn_handle, threshold_dbm, skip_count) };
+            let ret = unsafe { raw::sd_ble_gap_rssi_start(conn_handle, 0, 0) };
             if let Err(err) = RawError::convert(ret) {
                 warn!("sd_ble_gap_rssi_start err {:?}", err);
             }
@@ -552,26 +542,12 @@ impl Connection {
 
     /// Get the connection's RSSI, averaged over the RSSI events.
     ///
-    /// This will return None if `start_rssi*` has not been called yet, or if
+    /// This will return None if `start_rssi` has not been called yet, or if
     /// no measurement has been done yet.
     #[cfg(feature = "ble-rssi")]
     pub fn rssi(&self) -> Option<i8> {
         // Rounded to the nearest dBm.
         self.with_state(|state| state.rssi.map(|avg| (avg + 8).div_euclid(16) as i8))
-    }
-
-    /// Read the RSSI the SoftDevice sampled on the last connection event,
-    /// whether RSSI events are enabled or not.
-    ///
-    /// This will return None if `start_rssi*` has not been called yet, if no
-    /// measurement has been done yet, or once disconnected.
-    #[cfg(feature = "ble-rssi")]
-    pub fn read_rssi(&self) -> Option<i8> {
-        let conn_handle = self.with_state(|state| state.check_connected()).ok()?;
-        let (mut rssi, mut ch_index) = (0i8, 0i8);
-        let ret = unsafe { raw::sd_ble_gap_rssi_get(conn_handle, &mut rssi, &mut ch_index) };
-        RawError::convert(ret).ok()?;
-        Some(rssi)
     }
 
     /// Get the PHYs in use as `(tx, rx)`.
