@@ -543,6 +543,8 @@ pub(crate) unsafe fn on_evt(ble_evt: *const raw::ble_evt_t) {
 pub enum MtuExchangeError {
     /// Connection is disconnected.
     Disconnected,
+    /// The peer did not answer: no GATT client procedure can run on this connection anymore.
+    Timeout,
     Gatt(GattError),
     Raw(RawError),
 }
@@ -565,8 +567,12 @@ impl From<RawError> for MtuExchangeError {
     }
 }
 
-#[cfg(feature = "ble-central")]
-pub(crate) async fn att_mtu_exchange(conn: &Connection, mtu: u16) -> Result<(), MtuExchangeError> {
+/// Exchanges the ATT MTU with the peer, as GATT client, asking for `mtu` (normally the configured
+/// `att_mtu`). Does nothing if the ATT MTU is already at least `mtu`, e.g. after an exchange
+/// started by the peer.
+///
+/// Once it returns `Ok`, [`Connection::att_mtu`] holds the ATT MTU in use.
+pub async fn att_mtu_exchange(conn: &Connection, mtu: u16) -> Result<(), MtuExchangeError> {
     let conn_handle = conn.with_state(|state| state.check_connected())?;
 
     let current_mtu = conn.with_state(|state| state.att_mtu);
@@ -589,24 +595,32 @@ pub(crate) async fn att_mtu_exchange(conn: &Connection, mtu: u16) -> Result<(), 
         warn!("sd_ble_gattc_exchange_mtu_request err {:?}", err);
         return Err(err.into());
     }
+    // The SoftDevice requires the same RX MTU if the peer starts an exchange too (see
+    // `gatt_server::on_evt`).
+    conn.with_state(|state| state.att_rx_mtu = mtu);
 
     portal(conn_handle)
-        .wait_once(|ble_evt| unsafe {
+        .wait_many(|ble_evt| unsafe {
             match (*ble_evt).header.evt_id as u32 {
-                raw::BLE_GAP_EVTS_BLE_GAP_EVT_DISCONNECTED => return Err(MtuExchangeError::Disconnected),
+                raw::BLE_GAP_EVTS_BLE_GAP_EVT_DISCONNECTED => Some(Err(MtuExchangeError::Disconnected)),
+                raw::BLE_GATTC_EVTS_BLE_GATTC_EVT_TIMEOUT => Some(Err(MtuExchangeError::Timeout)),
                 raw::BLE_GATTC_EVTS_BLE_GATTC_EVT_EXCHANGE_MTU_RSP => {
                     let gattc_evt = match check_status(ble_evt) {
                         Ok(evt) => evt,
-                        Err(e) => return Err(e.into()),
+                        Err(e) => return Some(Err(e.into())),
                     };
                     let params = get_union_field(ble_evt, &gattc_evt.params.exchange_mtu_rsp);
-                    let mtu = params.server_rx_mtu;
-                    debug!("att mtu exchange: got mtu {:?}", mtu);
-                    conn.with_state(|state| state.att_mtu = mtu);
+                    // The SoftDevice uses the smaller of both RX MTUs, never under the default.
+                    let att_mtu = params.server_rx_mtu.min(mtu).max(raw::BLE_GATT_ATT_MTU_DEFAULT as u16);
+                    debug!(
+                        "att mtu exchange: peer rx mtu {:?}, att mtu {:?}",
+                        params.server_rx_mtu, att_mtu
+                    );
+                    conn.with_state(|state| state.att_mtu = att_mtu);
 
-                    Ok(())
+                    Some(Ok(()))
                 }
-                e => panic!("unexpected event {}", e),
+                _ => None,
             }
         })
         .await

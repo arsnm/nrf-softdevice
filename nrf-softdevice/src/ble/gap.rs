@@ -109,15 +109,22 @@ pub(crate) unsafe fn on_evt(ble_evt: *const raw::ble_evt_t) {
             }
         }
         raw::BLE_GAP_EVTS_BLE_GAP_EVT_PHY_UPDATE => {
-            let _phy_update = gap_evt.params.phy_update;
+            let phy_update = gap_evt.params.phy_update;
 
             trace!(
                 "on_phy_update conn_handle={:?} status={:?} rx_phy={:?} tx_phy={:?}",
                 gap_evt.conn_handle,
-                _phy_update.status,
-                _phy_update.rx_phy,
-                _phy_update.tx_phy
+                phy_update.status,
+                phy_update.rx_phy,
+                phy_update.tx_phy
             );
+
+            if u32::from(phy_update.status) == raw::BLE_HCI_STATUS_CODE_SUCCESS {
+                connection::with_state_by_conn_handle(gap_evt.conn_handle, |state| {
+                    state.tx_phy = phy_update.tx_phy;
+                    state.rx_phy = phy_update.rx_phy;
+                });
+            }
         }
         #[cfg(any(feature = "s113", feature = "s132", feature = "s140"))]
         raw::BLE_GAP_EVTS_BLE_GAP_EVT_DATA_LENGTH_UPDATE_REQUEST => {
@@ -156,12 +163,11 @@ pub(crate) unsafe fn on_evt(ble_evt: *const raw::ble_evt_t) {
         }
         #[cfg(feature = "ble-rssi")]
         raw::BLE_GAP_EVTS_BLE_GAP_EVT_RSSI_CHANGED => {
-            let new_rssi = gap_evt.params.rssi_changed.rssi;
+            let sample = i16::from(gap_evt.params.rssi_changed.rssi) * 16;
             connection::with_state_by_conn_handle(gap_evt.conn_handle, |state| {
-                state.rssi = match state.rssi {
-                    None => Some(new_rssi),
-                    Some(old_rssi) => Some((((old_rssi as i16) * 7 + (new_rssi as i16)) / 8) as i8),
-                };
+                // Moving average over about 8 samples, in 1/16 dBm: in whole dBm, the division
+                // (truncating towards 0) would let it rise but hold it up to 7dB above the samples.
+                state.rssi = Some(state.rssi.map_or(sample, |avg| avg + (sample - avg) / 8))
             });
         }
         raw::BLE_GAP_EVTS_BLE_GAP_EVT_SEC_PARAMS_REQUEST => {

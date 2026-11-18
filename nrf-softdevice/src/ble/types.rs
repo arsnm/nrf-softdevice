@@ -273,6 +273,19 @@ pub enum Phy {
     Coded = 4,
 }
 
+impl Phy {
+    /// From a single `BLE_GAP_PHY_*` value.
+    pub(crate) fn from_raw(value: u8) -> Option<Self> {
+        match u32::from(value) {
+            raw::BLE_GAP_PHY_1MBPS => Some(Self::M1),
+            raw::BLE_GAP_PHY_2MBPS => Some(Self::M2),
+            #[cfg(feature = "s140")]
+            raw::BLE_GAP_PHY_CODED => Some(Self::Coded),
+            _ => None,
+        }
+    }
+}
+
 #[cfg_attr(feature = "defmt", derive(defmt::Format))]
 #[derive(Eq, PartialEq, Copy, Clone)]
 #[repr(u8)]

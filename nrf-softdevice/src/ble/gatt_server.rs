@@ -448,11 +448,19 @@ pub(crate) unsafe fn on_evt(ble_evt: *const raw::ble_evt_t) {
             let conn_handle = gatts_evt.conn_handle;
             let params = get_union_field(ble_evt, &gatts_evt.params.exchange_mtu_request);
             let want_mtu = params.client_rx_mtu;
-            let max_mtu = crate::Softdevice::steal().att_mtu;
-            let mtu = want_mtu.min(max_mtu).max(raw::BLE_GATT_ATT_MTU_DEFAULT as u16);
+            // Replay with our own RX MTU: the one this device declared if it started an exchange
+            // too (the SoftDevice requires the same value in both directions), the configured
+            // maximum otherwise. The SoftDevice use the smaller of both RX MTUs by itself.
+            let own_rx_mtu = connection::with_state_by_conn_handle(conn_handle, |state| state.att_rx_mtu);
+            let rx_mtu = if own_rx_mtu != 0 {
+                own_rx_mtu
+            } else {
+                crate::Softdevice::steal().att_mtu
+            };
+            let mtu = want_mtu.min(rx_mtu).max(raw::BLE_GATT_ATT_MTU_DEFAULT as u16);
             trace!("att mtu exchange: peer wants mtu {:?}, granting {:?}", want_mtu, mtu);
 
-            let ret = { raw::sd_ble_gatts_exchange_mtu_reply(conn_handle, mtu) };
+            let ret = { raw::sd_ble_gatts_exchange_mtu_reply(conn_handle, rx_mtu) };
             if let Err(_err) = RawError::convert(ret) {
                 warn!("sd_ble_gatts_exchange_mtu_reply err {:?}", _err);
                 return;

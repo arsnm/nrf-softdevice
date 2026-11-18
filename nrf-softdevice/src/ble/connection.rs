@@ -3,7 +3,7 @@ use core::iter::FusedIterator;
 
 use raw::ble_gap_conn_params_t;
 
-use super::{HciStatus, PhySet};
+use super::{HciStatus, Phy, PhySet};
 #[cfg(feature = "ble-central")]
 use crate::ble::gap::default_security_params;
 #[cfg(feature = "ble-sec")]
@@ -244,12 +244,17 @@ pub(crate) struct ConnectionState {
     pub conn_params: ble_gap_conn_params_t,
 
     #[cfg(feature = "ble-rssi")]
-    pub rssi: Option<i8>,
+    pub rssi: Option<i16>, // Averaged RSSI, in 1/16 dBm.
 
     #[cfg(feature = "ble-gatt")]
     pub att_mtu: u16, // Effective ATT_MTU size (in bytes).
+    #[cfg(feature = "ble-gatt")]
+    pub att_rx_mtu: u16, // RX MTU of this device's own ATT_MTU exchange request (0 if none).
     #[cfg(any(feature = "s113", feature = "s132", feature = "s140"))]
     pub data_length_effective: u8, // Effective data length (in bytes).
+
+    pub tx_phy: u8, // PHY in use (BLE_GAP_PHY_*), 0 until the first PHY update.
+    pub rx_phy: u8,
 
     #[cfg(feature = "ble-sec")]
     pub security: EncryptionState,
@@ -279,8 +284,12 @@ impl ConnectionState {
             rssi: None,
             #[cfg(feature = "ble-gatt")]
             att_mtu: 0,
+            #[cfg(feature = "ble-gatt")]
+            att_rx_mtu: 0,
             #[cfg(any(feature = "s113", feature = "s132", feature = "s140"))]
             data_length_effective: 0,
+            tx_phy: 0,
+            rx_phy: 0,
             #[cfg(feature = "ble-sec")]
             security: NEW_ENCRYPTION_STATE,
         }
@@ -483,9 +492,14 @@ impl Connection {
 
                 #[cfg(feature = "ble-gatt")]
                 att_mtu: raw::BLE_GATT_ATT_MTU_DEFAULT as _,
+                #[cfg(feature = "ble-gatt")]
+                att_rx_mtu: 0,
 
                 #[cfg(any(feature = "s113", feature = "s132", feature = "s140"))]
                 data_length_effective: BLE_GAP_DATA_LENGTH_DEFAULT,
+
+                tx_phy: 0,
+                rx_phy: 0,
 
                 #[cfg(feature = "ble-sec")]
                 security: NEW_ENCRYPTION_STATE,
@@ -514,24 +528,59 @@ impl Connection {
         Ok(conn)
     }
 
-    /// Start measuring RSSI on this connection.
+    /// Start measuring RSSI on this connection, with an event (averaged into
+    /// [`Self::rssi`]) on every connection event.
     #[cfg(feature = "ble-rssi")]
     pub fn start_rssi(&self) {
+        self.start_rssi_with(0, 0)
+    }
+
+    /// Start measuring RSSI on this connection. The SoftDevice samples it on
+    /// every connection event, and raises an event (averaged into
+    /// [`Self::rssi`]) once it changed by `threshold_bdm` or more for
+    /// `skip_count` samples. With `raw::BLE_GAP_RSSI_THRESHOLD_INVALID`, no
+    /// events: read the last sample with [`Self::read_rssi`].
+    #[cfg(feature = "ble-rssi")]
+    pub fn start_rssi_with(&self, threshold_dbm: u8, skip_count: u8) {
         if let Ok(conn_handle) = self.with_state(|state| state.check_connected()) {
-            let ret = unsafe { raw::sd_ble_gap_rssi_start(conn_handle, 0, 0) };
+            let ret = unsafe { raw::sd_ble_gap_rssi_start(conn_handle, threshold_dbm, skip_count) };
             if let Err(err) = RawError::convert(ret) {
                 warn!("sd_ble_gap_rssi_start err {:?}", err);
             }
         }
     }
 
-    /// Get the connection's RSSI.
+    /// Get the connection's RSSI, averaged over the RSSI events.
     ///
-    /// This will return None if `start_rssi` has not been called yet, or if
+    /// This will return None if `start_rssi*` has not been called yet, or if
     /// no measurement has been done yet.
     #[cfg(feature = "ble-rssi")]
     pub fn rssi(&self) -> Option<i8> {
-        self.with_state(|state| state.rssi)
+        // Rounded to the nearest dBm.
+        self.with_state(|state| state.rssi.map(|avg| (avg + 8).div_euclid(16) as i8))
+    }
+
+    /// Read the RSSI the SoftDevice sampled on the last connection event,
+    /// whether RSSI events are enabled or not.
+    ///
+    /// This will return None if `start_rssi*` has not been called yet, if no
+    /// measurement has been done yet, or once disconnected.
+    #[cfg(feature = "ble-rssi")]
+    pub fn read_rssi(&self) -> Option<i8> {
+        let conn_handle = self.with_state(|state| state.check_connected()).ok()?;
+        let (mut rssi, mut ch_index) = (0i8, 0i8);
+        let ret = unsafe { raw::sd_ble_gap_rssi_get(conn_handle, &mut rssi, &mut ch_index) };
+        RawError::convert(ret).ok()?;
+        Some(rssi)
+    }
+
+    /// Get the PHYs in use as `(tx, rx)`.
+    ///
+    /// None until a PHY update procedure (started by either side) has completed
+    /// on this connection: until then, the connection runs on the PHY it was
+    /// established on (1M for legacy advertising).
+    pub fn phy(&self) -> Option<(Phy, Phy)> {
+        self.with_state(|state| Some((Phy::from_raw(state.tx_phy)?, Phy::from_raw(state.rx_phy)?)))
     }
 
     /// Get the currently active connection params.

@@ -82,7 +82,17 @@ nrf-softdevice-macro = { version = "0.1.0", path = "../nrf-softdevice-macro", op
 
 [package.metadata.docs.rs]
 targets = ["thumbv7em-none-eabi"]
-features = ["nrf52840", "s140", "ble-central", "ble-peripheral", "ble-l2cap", "ble-gatt-server", "ble-gatt-client", "ble-rssi", "ble-sec"]
+features = [
+  "nrf52840",
+  "s140",
+  "ble-central",
+  "ble-peripheral",
+  "ble-l2cap",
+  "ble-gatt-server",
+  "ble-gatt-client",
+  "ble-rssi",
+  "ble-sec",
+]
 rustdoc-args = ["--cfg", "docsrs"]
 
 
@@ -91,9 +101,53 @@ src_base = "https://github.com/embassy-rs/nrf-softdevice/blob/nrf-softdevice-mbr
 src_base_git = "https://github.com/embassy-rs/nrf-softdevice/blob/$COMMIT/nrf-softdevice/src/"
 target = "thumbv7em-none-eabi"
 flavors = [
-    { name = "s112", features = ["nrf52832", "s112", "ble-peripheral", "ble-gatt-server", "ble-gatt-client", "ble-rssi", "ble-sec"] },
-    { name = "s113", features = ["nrf52840", "s113", "ble-peripheral", "ble-l2cap", "ble-gatt-server", "ble-gatt-client", "ble-rssi", "ble-sec"] },
-    { name = "s122", features = ["nrf52833", "s122", "ble-central", "ble-gatt-server", "ble-gatt-client", "ble-rssi"] },
-    { name = "s132", features = ["nrf52832", "s132", "ble-central", "ble-peripheral", "ble-l2cap", "ble-gatt-server", "ble-gatt-client", "ble-rssi", "ble-sec"] },
-    { name = "s140", features = ["nrf52840", "s140", "ble-central", "ble-peripheral", "ble-l2cap", "ble-gatt-server", "ble-gatt-client", "ble-rssi", "ble-sec"] },
+  { name = "s112", features = [
+    "nrf52832",
+    "s112",
+    "ble-peripheral",
+    "ble-gatt-server",
+    "ble-gatt-client",
+    "ble-rssi",
+    "ble-sec",
+  ] },
+  { name = "s113", features = [
+    "nrf52840",
+    "s113",
+    "ble-peripheral",
+    "ble-l2cap",
+    "ble-gatt-server",
+    "ble-gatt-client",
+    "ble-rssi",
+    "ble-sec",
+  ] },
+  { name = "s122", features = [
+    "nrf52833",
+    "s122",
+    "ble-central",
+    "ble-gatt-server",
+    "ble-gatt-client",
+    "ble-rssi",
+  ] },
+  { name = "s132", features = [
+    "nrf52832",
+    "s132",
+    "ble-central",
+    "ble-peripheral",
+    "ble-l2cap",
+    "ble-gatt-server",
+    "ble-gatt-client",
+    "ble-rssi",
+    "ble-sec",
+  ] },
+  { name = "s140", features = [
+    "nrf52840",
+    "s140",
+    "ble-central",
+    "ble-peripheral",
+    "ble-l2cap",
+    "ble-gatt-server",
+    "ble-gatt-client",
+    "ble-rssi",
+    "ble-sec",
+  ] },
 ]

@@ -330,16 +330,12 @@ impl<const K: usize> AdvertisementBuilder<K> {
         let p = self.ptr;
         if p + 2 + name.len() <= K {
             self.full_name(name)
+        } else if p + 2 < K {
+            // As much of the name as fits after the length and type bytes.
+            self.raw(AdvertisementDataType::SHORT_NAME, name.as_bytes().split_at(K - p - 2).0)
         } else {
-            let mut res = self.write(&[(K - p) as u8, AdvertisementDataType::SHORT_NAME.to_u8()]);
-            let mut i: usize = 0;
-            let bytes = name.as_bytes();
-            while res.ptr < K {
-                res.buf[res.ptr] = bytes[i];
-                res.ptr += 1;
-                i += 1;
-            }
-            res
+            // No room left for any of the name.
+            self
         }
     }
 }
